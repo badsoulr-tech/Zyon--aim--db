@@ -13,7 +13,7 @@ G="\033[32m";R="\033[31m";Y="\033[33m";C="\033[36m";D="\033[90m";N="\033[0m";B="
 CFG={"sw":1080,"sh":2400,"fire":[950,1800],
      "fov":450,"kp":0.32,"kd":0.08,
      "rec":18.0,"cd":110,
-     "conf":0.30,"iou":0.50,"sz":640,"sz_idle":416,
+     "conf":0.30,"iou":0.50,"sz":640,"sz_idle":640,
      "head":0.12,"dz":6,"max_swipe":180,"ema":0.45,
      "tiou":0.25,"mmiss":10,"ab":"com.aimbuddy"}
 
@@ -170,7 +170,7 @@ class Yolo:
         s.s=ort.InferenceSession(p,providers=["CPUExecutionProvider"])
         s.i=s.s.get_inputs()[0].name
     def det(s,img,cf,io,quick=False):
-        sz=CFG["sz_idle"] if quick else CFG["sz"]
+        sz=s.s.get_inputs()[0].shape[2]
         w0,h0=img.size
         a=np.array(img.resize((sz,sz)),dtype=np.float32)/255.
         a=np.transpose(a,(2,0,1))[None,...]
