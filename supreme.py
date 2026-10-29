@@ -1,24 +1,46 @@
+cat << 'SCRIPT_EOF' > ~/bootstrap.sh
+#!/data/data/com.termux/files/usr/bin/bash
+
+GITHUB_USER="badsoulr-tech"      # <-- COLOQUE SEU USUARIO AQUI
+GITHUB_TOKEN="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"       # <-- COLOQUE SEU TOKEN AQUI
+REPO="zyon-aim-db"
+
+echo "⏳ Instalando dependências base..."
+pkg update -y > /dev/null 2>&1
+pkg install python python-numpy python-pillow android-tools ffmpeg git -y > /dev/null 2>&1
+
+echo "🎮 Instalando drivers Turnip (Mesa Vulkan) para Adreno..."
+pkg install mesa-vulkan-icd-freedreno vulkan-tools -y > /dev/null 2>&1
+
+echo "🔍 Verificando suporte a Vulkan/Turnip..."
+if command -v vulkaninfo >/dev/null 2>&1; then
+    vulkaninfo --summary 2>/dev/null | grep -E "deviceName|driverName" | head -4
+else
+    echo "vulkaninfo não encontrado. O Turnip pode não estar ativo."
+fi
+
+echo "📁 Clonando banco de dados do GitHub..."
+mkdir -p ~/zyon_db
+cd ~/zyon_db
+git clone https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${REPO}.git . 2>/dev/null || true
+
+git config user.name "Zyon AI"
+git config user.email "zyon@ai.local"
+
+echo "🧠 Instalando Motor Supremo (com aceleração de hardware no FFmpeg)..."
 cat << 'PYEOF' > ~/zyon_db/supreme.py
-import subprocess, time, json, os, threading
+import subprocess, time, json, os, threading, sys
 import numpy as np
 
-# ═════════════════════════════════════════════════════════════════
-# CONFIGURAÇÕES DO GITHUB
-# ═════════════════════════════════════════════════════════════════
 DB_DIR = os.path.expanduser("~/zyon_db")
 CONFIG_FILE = os.path.join(DB_DIR, "config.json")
 
 def sync_from_github():
-    """Puxa atualizações do GitHub (Código e config.json) antes de rodar."""
     print("[*] Verificando atualizações no GitHub...")
     try:
-        # Verifica se há novos commits no servidor
         subprocess.run(["git", "fetch", "origin", "main"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        # Pega o hash local e o hash remoto
         local_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=DB_DIR).decode().strip()
         remote_hash = subprocess.check_output(["git", "rev-parse", "origin/main"], cwd=DB_DIR).decode().strip()
-        
         if local_hash != remote_hash:
             print("[+] Novas atualizações encontradas! Baixando...")
             subprocess.run(["git", "pull", "origin", "main"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -47,9 +69,6 @@ def load_config():
     except:
         return {"best_score": 9999.0, "pid_kp": 1.5, "pid_kd": 0.1, "r_min": 150, "gb_max": 80, "search_w": 500, "search_bottom": 150, "aim_speed_ms": 25}
 
-# ═════════════════════════════════════════════════════════════════
-# ALGORITMOS DE CONTROLE
-# ═════════════════════════════════════════════════════════════════
 class KalmanFilter:
     def __init__(self):
         self.x = np.zeros((4, 1))
@@ -88,9 +107,6 @@ class SelfImprovingPID:
         self.prev_error = error
         return out
 
-# ═════════════════════════════════════════════════════════════════
-# CAPTURA E DETECÇÃO
-# ═════════════════════════════════════════════════════════════════
 def get_screen_resolution():
     try:
         out = subprocess.check_output(["adb", "shell", "wm", "size"]).decode()
@@ -101,8 +117,18 @@ def get_screen_resolution():
         return 1080, 2400
 
 def start_video_stream(w, h):
-    adb_proc = subprocess.Popen(["adb", "exec-out", "screenrecord", "--output-format=h264", "--bit-rate", "8000000", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    ffmpeg_cmd = ["ffmpeg", "-loglevel", "error", "-i", "-", "-f", "rawvideo", "-pix_fmt", "rgb24", "-vf", f"scale={w}:{h},fps=30", "-"]
+    print("[*] Iniciando stream de vídeo (tentando aceleração mediacodec)...")
+    adb_proc = subprocess.Popen(
+        ["adb", "exec-out", "screenrecord", "--output-format=h264", "--bit-rate", "8000000", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
+    # Tenta usar aceleração de hardware do Android (mediacodec). Se falhar, cai para CPU.
+    ffmpeg_cmd = [
+        "ffmpeg", "-loglevel", "error",
+        "-hwaccel", "mediacodec", "-i", "-",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-vf", f"scale={w}:{h},fps=30", "-"
+    ]
     return subprocess.Popen(ffmpeg_cmd, stdin=adb_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
 def inject_swipe(x1, y1, x2, y2, ms):
@@ -135,14 +161,8 @@ def detect_target(frame, cx, cy, cfg):
                     best_target = (tx, ty)
     return best_target
 
-# ═════════════════════════════════════════════════════════════════
-# LOOP PRINCIPAL
-# ═════════════════════════════════════════════════════════════════
 def main():
-    # 1. Tenta puxar o código mais recente do GitHub
     synced = sync_from_github()
-    
-    # Se baixou uma versão nova do próprio supreme.py, reinicia o script automaticamente
     if synced:
         print("[*] Reiniciando o motor com a versão mais recente...")
         os.execv(sys.executable, [sys.executable] + sys.argv)
@@ -220,7 +240,11 @@ def main():
         print("\n[!] Parando motor...")
 
 if __name__ == "__main__":
-    import sys
     main()
 PYEOF
-echo "✅ Código atualizado com Auto-Pull!"
+
+echo "✅ Instalação concluída!"
+echo "▶️ Para iniciar, rode: python ~/zyon_db/supreme.py"
+SCRIPT_EOF
+
+chmod +x ~/bootstrap.sh
