@@ -15,23 +15,11 @@ def load_config():
 def push_to_github(score, context):
     if not os.path.exists(os.path.join(DB_DIR, ".git")): return
     try:
-        log_data = []
-        if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, "r") as f: log_data = json.load(f)
-        log_data.append({
-            "timestamp": datetime.datetime.now().isoformat(),
-            "score": float(score),
-            "context": context
-        })
-        log_data = log_data[-50:]
-        with open(LOG_FILE, "w") as f: json.dump(log_data, f, indent=2)
-    except: return
-    try:
         subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["git", "add", "config.json", "learning_log.json"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["git", "add", "config.json"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["git", "commit", "-m", f"Evolucao: score={score:.1f}"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["git", "push", "origin", "main"], cwd=DB_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"[+] Parâmetros salvos. Score: {score:.1f}")
+        print(f"[+] Parâmetros salvos.")
     except: pass
 
 def run_adb(cmd_str):
@@ -81,35 +69,55 @@ class KalmanFilter:
         self.x = self.x + K @ y; self.P = (np.eye(4) - K @ self.H) @ self.P
         return int(self.x[0,0]), int(self.x[1,0])
 
-def detect_hp_bar(frame, cx, cy, fov):
+# ═════════════════════════════════════════════════════════════════
+# NOVO DETECTOR: BLOB + RASTREAMENTO POR HISTERESE
+# ═════════════════════════════════════════════════════════════════
+def detect_hp_bar_blob(frame, cx, cy, fov):
     sw = int(600 * fov); sb = int(400 * fov)
     x1,x2 = int(max(0,cx-sw//2)), int(min(frame.shape[1],cx+sw//2))
     y1,y2 = int(max(0, 200-(fov-1)*50)), int(min(frame.shape[0],cy+sb))
     roi = frame[y1:y2, x1:x2]
-    r = roi[:,:,0].astype(int); g = roi[:,:,1].astype(int); b = roi[:,:,2].astype(int)
-    mask = ((r > 170) & (g < 80) & (b < 80)) | ((r > 120) & (r < 180) & (g < 60) & (b < 60))
     
-    best, best_score = None, 0
-    for bw, bh in [(12,4),(16,5),(22,6),(30,8)]:
-        for by in range(0, mask.shape[0] - bh, bh):
-            for bx in range(0, mask.shape[1] - bw, bw):
-                count = np.sum(mask[by:by+bh, bx:bx+bw])
-                if count > (bw * bh * 0.35):
-                    tx, ty = bx + bw//2 + x1, by + bh//2 + y1
-                    dist = np.hypot(tx - cx, ty - cy)
-                    score = count - (dist * 0.15)
-                    if score > best_score:
-                        best_score = score; best = (tx, ty)
-    return best
+    r = roi[:,:,0].astype(int); g = roi[:,:,1].astype(int); b = roi[:,:,2].astype(int)
+    # Filtro rígido para vermelho de HP bar (ignora sangue escuro)
+    mask = (r > 170) & (g < 60) & (b < 60)
+    
+    # Encontra componentes conectados simples
+    # (Varre a imagem em blocos para achar um retângulo horizontal)
+    best_target = None
+    best_score = 0
+    
+    # Bloco de varredura (tamanho da barra de vida)
+    bw, bh = 40, 6 
+    
+    for by in range(0, mask.shape[0] - bh, 2):
+        for bx in range(0, mask.shape[1] - bw, 2):
+            block = mask[by:by+bh, bx:bx+bw]
+            count = np.sum(block)
+            
+            # A barra precisa ter pelo menos 40% de pixels vermelhos no bloco
+            if count > (bw * bh * 0.40):
+                tx, ty = bx + bw//2 + x1, by + bh//2 + y1
+                dist = np.hypot(tx - cx, ty - cy)
+                # Score prioriza blocos com mais vermelho e mais perto do centro
+                score = count - (dist * 0.1)
+                if score > best_score:
+                    best_score = score; best_target = (tx, ty)
+                    
+    return best_target
 
 def main():
-    print("🔥 RAGE ENGINE ONLINE 🔥")
+    print("🔥 RAGE ENGINE V4 (BLOB TRACKING) 🔥")
     db = load_config(); W,H = get_res(); CX,CY = W//2,H//2
     print(f"[*] Tela: {W}x{H}")
     kf = KalmanFilter()
     stream = start_stream(W,H); fs = W*H*3
     last_aim=last_shot=0; hist=[]; fov=1.0
     cur_pkg="unknown"; cfg=None
+    
+    # Variáveis de Histerese (para não tremer a mira)
+    locked_target = None
+    lost_frames = 0
 
     try:
         while True:
@@ -126,30 +134,49 @@ def main():
             raw = stream.stdout.read(fs)
             if len(raw)!=fs: continue
             frame = np.frombuffer(raw,np.uint8).reshape((H,W,3))
-            target = detect_hp_bar(frame, CX, CY, fov); now = time.time()
+            
+            target = detect_hp_bar_blob(frame, CX, CY, fov)
+            now = time.time()
             
             if target:
-                fov = max(0.8, fov - 0.05)
-                tx,ty = target; px,py = kf.update(tx,ty)
+                lost_frames = 0
+                locked_target = target
+                fov = max(0.8, fov - 0.02) # Foca suavemente
+                
+                tx,ty = target
+                px,py = kf.update(tx,ty)
                 ex,ey = px-CX,py-CY; dist = np.hypot(ex,ey)
-                if dist > 100 and (now - last_aim > 0.02):
+                
+                # SNAP Rápido (Se longe)
+                if dist > 80 and (now - last_aim > 0.03):
                     swipe_fast(CX, CY, px, py, 5); last_aim = now
-                elif dist > 20 and (now - last_aim > 0.01):
-                    swipe_fast(CX, CY, CX + ex*0.9, CY + ey*0.9, 10); last_aim = now
-                if dist < 30 and (now - last_shot > 0.08):
+                # MICRO-AJUSTE (Se perto)
+                elif dist > 15 and (now - last_aim > 0.01):
+                    swipe_fast(CX, CY, CX + ex*0.7, CY + ey*0.7, 15); last_aim = now
+                
+                # TRIGGER (Atira se estiver bem no centro)
+                if dist < 25 and (now - last_shot > 0.1):
                     tap_fast(CX, CY)
-                    swipe_fast(CX, CY, CX, CY + cfg["recoil_strength"], 10); last_shot = now
+                    # Puxa o recuo imediatamente
+                    swipe_fast(CX, CY, CX, CY + cfg["recoil_strength"], 10)
+                    last_shot = now
+                
                 hist.append(dist)
                 if len(hist) > 100:
                     sc = np.mean(hist) + np.std(hist)
                     if sc < cfg["best_score"]:
                         cfg["best_score"] = sc; db["games"][cur_pkg] = cfg
                         with open(CONFIG_FILE,"w") as f: json.dump(db,f,indent=2)
-                        context = {"game": cur_pkg, "kp": cfg["pid_kp"], "recoil": cfg["recoil_strength"], "fov": fov}
-                        threading.Thread(target=push_to_github, args=(sc, context)).start()
+                        threading.Thread(target=push_to_github, args=(sc, {"game": cur_pkg})).start()
                     hist.clear()
             else:
-                fov = min(1.5, fov + 0.05); kf.init=False
+                # Histerese: só solta o alvo se ele sumir por 5 frames seguidos
+                lost_frames += 1
+                if lost_frames > 5:
+                    locked_target = None
+                    kf.init = False
+                fov = min(1.5, fov + 0.05)
+                
     except KeyboardInterrupt: print("\n[!] Parando...")
 
 if __name__ == "__main__":
