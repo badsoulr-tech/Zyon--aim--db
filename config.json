@@ -1,0 +1,10 @@
+{
+  "best_score": 9999.0,
+  "pid_kp": 1.5,
+  "pid_kd": 0.1,
+  "r_min": 150,
+  "gb_max": 80,
+  "search_w": 500,
+  "search_bottom": 150,
+  "aim_speed_ms": 25
+}
