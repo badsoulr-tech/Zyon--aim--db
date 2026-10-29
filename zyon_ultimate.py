@@ -26,8 +26,33 @@ def adb(c,t=3):
     try:return subprocess.run(["adb","shell",c],capture_output=True,text=True,timeout=t).stdout.strip()
     except:return ""
 def check():
-    if "uid=2000" in rish("id"):SHELL["f"]=rish;return "rish"
-    if "uid=2000" in adb("id"):SHELL["f"]=adb;return "adb"
+    # tenta rish primeiro (mais rápido quando funciona)
+    for attempt in range(2):
+        r = rish("id", t=5)
+        if "uid=2000" in r:
+            SHELL["f"] = rish
+            return "rish"
+    # adb: acorda o daemon e tenta com timeout maior
+    subprocess.run(["adb", "start-server"], capture_output=True, timeout=10)
+    for attempt in range(3):
+        a = adb("id", t=6)
+        if "uid=2000" in a:
+            SHELL["f"] = adb
+            return "adb"
+    # última tentativa: reconectar adb
+    try:
+        devs = subprocess.run(["adb","devices"],capture_output=True,text=True,timeout=5).stdout
+        for line in devs.splitlines():
+            if "\tdevice" in line:
+                addr = line.split("\t")[0]
+                subprocess.run(["adb","disconnect",addr],capture_output=True,timeout=5)
+                subprocess.run(["adb","connect",addr],capture_output=True,timeout=10)
+                time.sleep(1)
+                if "uid=2000" in adb("id", t=6):
+                    SHELL["f"] = adb
+                    return "adb"
+    except Exception:
+        pass
     return None
 
 def cap():
