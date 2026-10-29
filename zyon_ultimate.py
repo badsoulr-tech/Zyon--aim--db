@@ -31,7 +31,7 @@ def open_aimbuddy():
     """Abre o app AimBuddy via shell se instalado."""
     global AIMBUDDY_PKG
     if AIMBUDDY_PKG is None:
-        out = SHELL["f"]("pm list packages 2>/dev/null | grep -iE 'aimbuddy|com\.aim'")
+        out = SHELL["f"](r"pm list packages 2>/dev/null | grep -iE 'aimbuddy|com\.aim'")
         for line in (out or "").split("\n"):
             if "package:" in line:
                 AIMBUDDY_PKG = line.split("package:")[1].strip()
