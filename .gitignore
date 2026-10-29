@@ -22,3 +22,4 @@ __pycache__/
 app/build/
 model.onnx
 STOP
+*.bak
