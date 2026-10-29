@@ -1,3 +1,5 @@
+# DEPRECATED: use rage_engine.py
+
 cat << 'PYEOF' > ~/zyon_db/supreme.py
 import subprocess, time, json, os, threading, sys, re
 import numpy as np
