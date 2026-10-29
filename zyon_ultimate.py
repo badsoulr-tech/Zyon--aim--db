@@ -110,6 +110,9 @@ def main():
     print("[*] abrindo AimBuddy…")
     if open_aimbuddy(): print("[*] AimBuddy ativo")
     else: print("[*] AimBuddy não instalado — overlay desabilitado")
+    print("[*] abrindo AimBuddy…")
+    if open_aimbuddy(): print("[*] AimBuddy ativo")
+    else: print("[*] AimBuddy não instalado — overlay desabilitado")
     rec=Recoil()
     st={"fps":0.,"fires":0,"hits":0,"dets":[],"aim":"idle","rec":CFG["rec"],
         "inf":0.,"cap":0.,"shell":sh,"hr":0.}
