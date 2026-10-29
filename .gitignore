@@ -1,0 +1,22 @@
+
+### 2. `.gitignore`
+
+```gitignore
+# Logs e arquivos temporários
+*.log
+*.tmp
+learning_log.json
+
+# Modelos (grandes, não vão pro repo)
+*.onnx
+*.pt
+*.tflite
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Builds
+*.apk
+app/build/
