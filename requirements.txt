@@ -1,0 +1,3 @@
+numpy
+# onnxruntime (instalar via pkg install python-onnxruntime no Termux)
+# opencv-python-headless (opcional — o motor usa NumPy puro)
