@@ -26,6 +26,21 @@ def check():
             SHELL["f"]=f
             return n
     return None
+AIMBUDDY_PKG = None  # auto-detectado no main()
+def open_aimbuddy():
+    """Abre o app AimBuddy via shell se instalado."""
+    global AIMBUDDY_PKG
+    if AIMBUDDY_PKG is None:
+        out = SHELL["f"]("pm list packages 2>/dev/null | grep -iE 'aimbuddy|com\.aim'")
+        for line in (out or "").split("\n"):
+            if "package:" in line:
+                AIMBUDDY_PKG = line.split("package:")[1].strip()
+                break
+    if not AIMBUDDY_PKG:
+        return False
+    SHELL["f"](f"am start -n {AIMBUDDY_PKG}/.MainActivity 2>/dev/null || am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {AIMBUDDY_PKG}")
+    return True
+
 def cap():
     SHELL["f"]("screencap -p /sdcard/_z.png")
     try:return Image.open("/sdcard/_z.png").convert("RGB")
@@ -92,6 +107,9 @@ def main():
     sh=check()
     if not sh:print("[!] SEM SHELL — instale Shizuku e rode: rish -c id");sys.exit(2)
     print(f"[*] shell: {sh}")
+    print("[*] abrindo AimBuddy…")
+    if open_aimbuddy(): print("[*] AimBuddy ativo")
+    else: print("[*] AimBuddy não instalado — overlay desabilitado")
     rec=Recoil()
     st={"fps":0.,"fires":0,"hits":0,"dets":[],"aim":"idle","rec":CFG["rec"],
         "inf":0.,"cap":0.,"shell":sh,"hr":0.}
