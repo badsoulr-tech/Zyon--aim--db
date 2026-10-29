@@ -8,67 +8,32 @@ CONFIG_FILE = os.path.join(DB_DIR, "config.json")
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
-def adb_devices():
-    out = run(["adb", "devices"]).stdout
-    return [l for l in out.strip().split('\n')[1:] if "device" in l and "offline" not in l]
-
-def get_local_ip():
-    """Pega o IP da rede Wi-Fi (wlan0)."""
-    try:
-        out = run(["ip", "route", "get", "8.8.8.8"]).stdout
-        match = re.search(r'src\s+([0-9.]+)', out)
-        if match: return match.group(1)
-        
-        out = run(["ifconfig", "wlan0"]).stdout
-        match = re.search(r'inet\s+(?:addr:)?([0-9.]+)', out)
-        if match: return match.group(1)
-    except: pass
-    return None
-
-def ensure_adb_connection():
+# ═════════════════════════════════════════════════════════════════
+# VERIFICAÇÃO MANUAL DO ADB
+# ═════════════════════════════════════════════════════════════════
+def check_adb_manual():
     print("[*] Verificando conexão ADB...")
-    if adb_devices():
-        print("[+] ADB já conectado.")
+    out = run(["adb", "devices"]).stdout
+    # Verifica se há alguma linha com "device" e sem "offline"
+    lines = out.strip().split('\n')[1:]
+    if any("device" in line and "offline" not in line for line in lines):
+        print("[+] ADB Conectado com sucesso.")
         return True
-
-    print("[*] Conexão perdida. Tentando reconectar automaticamente...")
-
-    # 1. Tenta mDNS
-    services = run(["adb", "mdns", "services"]).stdout
-    if "connect" in services:
-        for line in services.splitlines():
-            if "_adb-tls-connect._tcp" in line:
-                addr = line.split()[-1]
-                print(f"[*] mDNS encontrou: {addr}")
-                run(["adb", "connect", addr])
-                time.sleep(2)
-                if adb_devices(): return True
-
-    # 2. Tenta IP Local direto (porta 5555 ou porta padrão do Android 11+)
-    local_ip = get_local_ip()
-    if local_ip:
-        print(f"[*] Testando IP local: {local_ip}")
-        for port in [5555, 5037, 37000]: # Tenta portas comuns de debug
-            addr = f"{local_ip}:{port}"
-            run(["adb", "connect", addr])
-            time.sleep(1)
-            if adb_devices():
-                print(f"[+] Conectado via IP Local: {addr}")
-                return True
-
-    # 3. Falha total
-    print("\n❌ FALHA NO ADB AUTOMÁTICO.")
-    print("⚠️  ATENÇÃO: O seu roteador pode estar bloqueando o mDNS ou a depuração está desligada.")
-    print("   Para corrigir, faça UMA VEZ manualmente:")
-    print("   1. Abra 'Depuração sem fio' nas Opções do Desenvolvedor.")
-    print("   2. Toque em 'Parear dispositivo com código'.")
-    print("   3. Rode no Termux: adb pair IP:PORTA")
-    print("   4. Digite o código e depois rode: adb connect IP:PORTA_CONEXAO")
-    print("   5. Após parear, o script vai se conectar sozinho nas próximas vezes.\n")
+    
+    print("\n❌ ERRO: O ADB não está conectado!")
+    print("⚠️  O script não vai tentar conectar sozinho. Faça o passo a passo:")
+    print("   1. Vá em 'Opções do Desenvolvedor' > 'Depuração sem fio'.")
+    print("   2. Ative e toque em 'Parear dispositivo com código'.")
+    print("   3. No Termux, rode: adb pair IP:PORTA")
+    print("   4. Digite o código de 6 dígitos.")
+    print("   5. Ainda na tela, anote a Porta de Conexão (diferente da de pareamento).")
+    print("   6. Rode: adb connect IP:PORTA_CONEXAO")
+    print("   7. Verifique com: adb devices")
+    print("   8. Rode este script novamente.\n")
     return False
 
 # ═════════════════════════════════════════════════════════════════
-# RESTO DO CÓDIGO (IGUAL AO ANTERIOR)
+# CONFIG E GITHUB
 # ═════════════════════════════════════════════════════════════════
 def load_config():
     try:
@@ -87,6 +52,9 @@ def push_to_github():
         print("[+] Modelo Evolutivo salvo no GitHub.")
     except: pass
 
+# ═════════════════════════════════════════════════════════════════
+# ALGORITMOS
+# ═════════════════════════════════════════════════════════════════
 class KalmanFilter:
     def __init__(self):
         self.x = np.zeros((4,1)); self.P = np.eye(4)*1000
@@ -151,12 +119,16 @@ def detect_rage(frame, cx, cy, cfg, fov):
                     max_pixels = score; best_x, best_y = tx, ty
     return (best_x, best_y) if best_x else None
 
+# ═════════════════════════════════════════════════════════════════
+# LOOP PRINCIPAL
+# ═════════════════════════════════════════════════════════════════
 def main():
     print("═══════════════════════════════════════════")
     print("🔥 MAGIC BULLET RAGE ENGINE 🔥")
     print("═══════════════════════════════════════════")
     
-    if not ensure_adb_connection(): sys.exit(1)
+    if not check_adb_manual():
+        sys.exit(1)
     
     db = load_config(); W,H = get_res(); CX,CY = W//2,H//2
     print(f"[*] Tela: {W}x{H} | Abrindo AimBuddy...")
@@ -201,6 +173,20 @@ def main():
                 
                 if dist < 25 and (now - last_shot > 0.1):
                     tap(CX,CY); swipe(CX,CY,CX,CY+cfg["recoil_strength"],10); last_shot=now
+                
+                hist.append(dist)
+                if len(hist) > 80:
+                    sc = np.mean(hist) + np.std(hist)*1.5
+                    if sc < cfg["best_score"]:
+                        cfg["best_score"]=sc; cfg["pid_kp"]=2.5; cfg["pid_kd"]=0.05
+                        db["games"][cur_pkg]=cfg
+                        with open(CONFIG_FILE,"w") as f: json.dump(db,f,indent=2)
+                        threading.Thread(target=push_to_github).start()
+                        print(f"[+] Modelo Otimizado! Score {sc:.1f}")
+                    else:
+                        cfg["r_min"] = max(100, min(200, cfg["r_min"] + random.choice([-2, 2])))
+                        cfg["gb_max"] = max(50, min(120, cfg["gb_max"] + random.choice([-2, 2])))
+                    hist.clear()
             else:
                 no_target+=1
                 if no_target>20: fov=min(2.0,fov+0.05)
@@ -212,4 +198,4 @@ def main():
 if __name__ == "__main__":
     main()
 PYEOF
-echo "✅ Script atualizado com resolução de IP Local!"
+echo "✅ Script atualizado. ADB automático removido."
