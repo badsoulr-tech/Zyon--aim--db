@@ -20,3 +20,5 @@ __pycache__/
 # Builds
 *.apk
 app/build/
+model.onnx
+STOP
