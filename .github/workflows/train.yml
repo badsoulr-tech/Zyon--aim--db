@@ -1,0 +1,43 @@
+name: Train YOLO Model
+
+on:
+  push:
+    paths:
+      - 'training/data/**'
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install ultralytics onnx onnxruntime
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Train YOLOv8n
+        run: |
+          yolo detect train data=training/data.yaml model=yolov8n.pt epochs=50 imgsz=320 batch=8
+          
+      - name: Export to ONNX
+        run: |
+          yolo export model=runs/detect/train/weights/best.pt format=onnx imgsz=320 opset=12
+
+      - name: Upload model as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: runs/detect/train/weights/best.onnx
+
+      - name: Create Release (se for tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: runs/detect/train/weights/best.onnx
